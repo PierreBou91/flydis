@@ -1,21 +1,33 @@
-use std::io::{self, Read};
+use serde::{Deserialize, Serialize};
 
-pub struct Node {}
-
-impl Node {
-    pub fn new() -> Self {
-        Node {}
-    }
-
-    pub fn listen(&self) {
-        let mut buf = vec![0; 1024];
-        let n = io::stdin().read_to_end(&mut buf).unwrap();
-        println!("buf: {:?}", &buf[..n]);
-    }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Message {
+    pub src: String,
+    pub dest: String,
+    pub body: Body,
 }
 
-impl Default for Node {
-    fn default() -> Self {
-        Self::new()
-    }
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Body {
+    pub r#type: r#Type,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub msg_id: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_reply_to: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub echo: Option<String>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum r#Type {
+    #[default]
+    Init,
+    InitOk,
+    Echo,
+    EchoOk,
 }
