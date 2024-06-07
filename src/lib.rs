@@ -20,6 +20,8 @@ pub struct Body {
     pub node_ids: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub echo: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -30,4 +32,6 @@ pub enum r#Type {
     InitOk,
     Echo,
     EchoOk,
+    Generate,
+    GenerateOk,
 }

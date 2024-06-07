@@ -1,5 +1,8 @@
 use flydis::*;
-use std::io::{self, BufRead, BufWriter, Write};
+use std::{
+    io::{self, BufRead, BufWriter, Write},
+    time::SystemTime,
+};
 
 fn main() {
     let stdin = io::stdin().lock();
@@ -33,7 +36,8 @@ fn process_line(line: Result<String, io::Error>) -> Result<Option<Message>, Stri
     match message.body.r#type {
         r#Type::Init => handle_init(message),
         r#Type::Echo => handle_echo(message),
-        r#Type::InitOk | r#Type::EchoOk => {
+        r#Type::Generate => handle_generate(message),
+        r#Type::InitOk | r#Type::EchoOk | r#Type::GenerateOk => {
             eprintln!("Unimplemented message type: {:?}", message.body.r#type);
             Ok(None)
         }
@@ -64,6 +68,22 @@ fn handle_echo(message: Message) -> Result<Option<Message>, String> {
             msg_id: message.body.msg_id,
             in_reply_to: message.body.msg_id,
             echo: message.body.echo,
+            ..Default::default()
+        },
+    };
+    eprintln!("Serialized output: {:?}", response);
+    Ok(Some(response))
+}
+
+fn handle_generate(message: Message) -> Result<Option<Message>, String> {
+    let response = Message {
+        src: message.dest.clone(),
+        dest: message.src,
+        body: Body {
+            r#type: r#Type::GenerateOk,
+            id: Some(format!("{}{:?}", message.dest, SystemTime::now())),
+            msg_id: message.body.msg_id,
+            in_reply_to: message.body.msg_id,
             ..Default::default()
         },
     };
