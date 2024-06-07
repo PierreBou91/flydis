@@ -3,29 +3,32 @@ use std::{
     io::{stdin, stdout, Write},
     time::SystemTime,
 };
+use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
 pub struct Node {
     pub id: String,
-    pub messages: Option<HashSet<usize>>,
-    pub topo: Option<HashMap<String, Vec<String>>>,
+    pub messages: HashSet<usize>,
+    pub topo: HashMap<String, Vec<String>>,
     pub ears: std::io::Stdin,
     pub mouth: std::io::Stdout,
+    pub propagate_list: HashSet<Message>,
 }
 
 impl Node {
     pub fn new() -> Self {
         Node {
             id: "NO_ID_YET".to_string(),
-            messages: Some(HashSet::new()),
-            topo: None,
+            messages: HashSet::new(),
+            topo: HashMap::new(),
             ears: stdin(),
             mouth: stdout(),
+            propagate_list: HashSet::new(),
         }
     }
 
-    pub fn speak(&mut self, message: Message) {
+    pub fn speak(&mut self, message: &Message) {
         if let Err(e) = serde_json::to_writer(&mut self.mouth, &message)
             .and_then(|_| writeln!(self.mouth).map_err(serde_json::Error::io))
         {
@@ -39,11 +42,11 @@ impl Node {
     }
 
     pub fn push_message(&mut self, message: usize) {
-        self.messages.as_mut().unwrap().insert(message);
+        self.messages.insert(message);
     }
 
     pub fn create_topo(&mut self, topo: HashMap<String, Vec<String>>) {
-        self.topo = Some(topo)
+        self.topo = topo
     }
 
     pub fn handle_init(&mut self, message: Message) {
@@ -59,7 +62,7 @@ impl Node {
             },
         };
         eprintln!("Serialized output: {:?}", response);
-        self.speak(response);
+        self.speak(&response);
     }
 
     pub fn handle_echo(&mut self, message: Message) {
@@ -75,7 +78,7 @@ impl Node {
             },
         };
         eprintln!("Serialized output: {:?}", response);
-        self.speak(response);
+        self.speak(&response);
     }
 
     pub fn handle_generate(&mut self, message: Message) {
@@ -91,13 +94,12 @@ impl Node {
             },
         };
         eprintln!("Serialized output: {:?}", response);
-        self.speak(response);
+        self.speak(&response);
     }
 
     pub fn handle_broadcast(&mut self, message: Message) {
         self.push_message(message.body.message.unwrap());
-        let neighbors = self.topo.as_ref().unwrap().get(self.id()).unwrap();
-        let mut props = Vec::new();
+        let neighbors = self.topo.get(self.id()).unwrap();
 
         // first broadcast to every neighboring node
         for neighbor in neighbors {
@@ -114,12 +116,13 @@ impl Node {
                     ..Default::default()
                 },
             };
-            // self.speak(propagate);
-            props.push(propagate)
+            self.propagate_list.insert(propagate);
         }
 
-        for p in props {
-            self.speak(p);
+        let to_speak: Vec<_> = self.propagate_list.iter().cloned().collect();
+
+        for p in to_speak {
+            self.speak(&p);
         }
 
         // then answer the boradcast_ok
@@ -134,7 +137,7 @@ impl Node {
             },
         };
         eprintln!("Serialized output: {:?}", response);
-        self.speak(response);
+        self.speak(&response);
     }
 
     pub fn handle_read(&mut self, message: Message) {
@@ -145,12 +148,12 @@ impl Node {
                 r#type: r#Type::ReadOk,
                 msg_id: message.body.msg_id,
                 in_reply_to: message.body.msg_id,
-                messages: self.messages.clone(),
+                messages: Some(self.messages.clone()),
                 ..Default::default()
             },
         };
         eprintln!("Serialized output: {:?}", response);
-        self.speak(response);
+        self.speak(&response);
     }
 
     pub fn handle_topology(&mut self, message: Message) {
@@ -166,7 +169,12 @@ impl Node {
             },
         };
         eprintln!("Serialized output: {:?}", response);
-        self.speak(response);
+        self.speak(&response);
+    }
+
+    pub fn handle_broadcast_ok(&mut self, message: Message) {
+        let pos = self.propagate_list.contains(x)
+        self.propagate_list.remove(index)
     }
 }
 
@@ -176,14 +184,14 @@ impl Default for Node {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Message {
     pub src: String,
     pub dest: String,
     pub body: Body,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Body {
     pub r#type: r#Type,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -206,7 +214,20 @@ pub struct Body {
     pub topology: Option<HashMap<String, Vec<String>>>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+impl Hash for Body {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.r#type.hash(state);
+        self.msg_id.hash(state);
+        self.in_reply_to.hash(state);
+        self.node_id.hash(state);
+        self.node_ids.hash(state);
+        self.echo.hash(state);
+        self.id.hash(state);
+        self.message.hash(state);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum r#Type {
     #[default]

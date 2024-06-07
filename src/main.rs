@@ -18,7 +18,7 @@ fn main() {
             Type::Broadcast => me.handle_broadcast(message),
             Type::Read => me.handle_read(message),
             Type::Topology => me.handle_topology(message),
-            Type::BroadcastOk => {} // ignore broadcast_ok messages
+            Type::BroadcastOk => me.handle_broadcast_ok(message),
             r#Type::InitOk
             | r#Type::EchoOk
             | r#Type::GenerateOk
