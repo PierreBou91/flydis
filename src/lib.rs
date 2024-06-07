@@ -1,27 +1,27 @@
 use std::{
-    collections::HashMap,
-    io::{stdin, stdout, BufWriter, Write},
+    collections::{HashMap, HashSet},
+    io::{stdin, stdout, Write},
     time::SystemTime,
 };
 
 use serde::{Deserialize, Serialize};
 
-pub struct Node<'a> {
+pub struct Node {
     pub id: String,
-    pub messages: Option<Vec<usize>>,
+    pub messages: Option<HashSet<usize>>,
     pub topo: Option<HashMap<String, Vec<String>>>,
     pub ears: std::io::Stdin,
-    pub mouth: BufWriter<std::io::StdoutLock<'a>>,
+    pub mouth: std::io::Stdout,
 }
 
-impl<'a> Node<'a> {
+impl Node {
     pub fn new() -> Self {
         Node {
             id: "NO_ID_YET".to_string(),
-            messages: Some(Vec::new()),
+            messages: Some(HashSet::new()),
             topo: None,
             ears: stdin(),
-            mouth: BufWriter::new(stdout().lock()),
+            mouth: stdout(),
         }
     }
 
@@ -39,7 +39,7 @@ impl<'a> Node<'a> {
     }
 
     pub fn push_message(&mut self, message: usize) {
-        self.messages.as_mut().unwrap().push(message);
+        self.messages.as_mut().unwrap().insert(message);
     }
 
     pub fn create_topo(&mut self, topo: HashMap<String, Vec<String>>) {
@@ -96,6 +96,33 @@ impl<'a> Node<'a> {
 
     pub fn handle_broadcast(&mut self, message: Message) {
         self.push_message(message.body.message.unwrap());
+        let neighbors = self.topo.as_ref().unwrap().get(self.id()).unwrap();
+        let mut props = Vec::new();
+
+        // first broadcast to every neighboring node
+        for neighbor in neighbors {
+            // except for the one who sent
+            if *neighbor == message.src {
+                continue;
+            }
+            let propagate = Message {
+                src: self.id().to_string(),
+                dest: neighbor.to_string(),
+                body: Body {
+                    r#type: r#Type::Broadcast,
+                    message: message.body.message,
+                    ..Default::default()
+                },
+            };
+            // self.speak(propagate);
+            props.push(propagate)
+        }
+
+        for p in props {
+            self.speak(p);
+        }
+
+        // then answer the boradcast_ok
         let response = Message {
             src: self.id().to_string(),
             dest: message.src,
@@ -143,7 +170,7 @@ impl<'a> Node<'a> {
     }
 }
 
-impl<'a> Default for Node<'a> {
+impl Default for Node {
     fn default() -> Self {
         Node::new()
     }
@@ -174,7 +201,7 @@ pub struct Body {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub messages: Option<Vec<usize>>,
+    pub messages: Option<HashSet<usize>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub topology: Option<HashMap<String, Vec<String>>>,
 }
