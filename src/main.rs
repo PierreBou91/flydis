@@ -18,13 +18,17 @@ fn main() {
             Type::Broadcast => me.handle_broadcast(message),
             Type::Read => me.handle_read(message),
             Type::Topology => me.handle_topology(message),
-            Type::BroadcastOk => me.handle_broadcast_ok(message),
+            // Type::BroadcastOk => me.handle_broadcast_ok(message),
             r#Type::InitOk
             | r#Type::EchoOk
             | r#Type::GenerateOk
             | r#Type::ReadOk
             | r#Type::TopologyOk => {
                 eprintln!("Unimplemented message type: {:?}", message.body.r#type);
+                panic!();
+            }
+            _ => {
+                eprintln!("Unknown message type: {:?}", message.body.r#type);
                 panic!();
             }
         };

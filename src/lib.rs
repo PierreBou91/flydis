@@ -1,9 +1,9 @@
+use std::hash::{Hash, Hasher};
 use std::{
     collections::{HashMap, HashSet},
     io::{stdin, stdout, Write},
     time::SystemTime,
 };
-use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
@@ -172,10 +172,10 @@ impl Node {
         self.speak(&response);
     }
 
-    pub fn handle_broadcast_ok(&mut self, message: Message) {
-        let pos = self.propagate_list.contains(x)
-        self.propagate_list.remove(index)
-    }
+    // pub fn handle_broadcast_ok(&mut self, message: Message) {
+    //     let pos = self.propagate_list.contains(x)
+    //     self.propagate_list.remove(index)
+    // }
 }
 
 impl Default for Node {

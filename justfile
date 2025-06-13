@@ -4,7 +4,8 @@ alias t3 := test_broadcast1
 alias t4 := test_broadcast2
 alias t5 := test_broadcast3
 
-bin := "target/release/flydis"
+# bin := "target/release/flydis"
+bin := "target/release/node"
 
 default:
   @just --list
