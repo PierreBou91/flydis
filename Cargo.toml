@@ -1,7 +1,8 @@
 [package]
 name = "flydis"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+default-run = "alter"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -10,3 +11,7 @@ serde_json = "1.0"
 [[bin]]
 name = "node"
 path = "src/main.rs"
+
+[[bin]]
+name = "alter"
+path = "src/alter.rs"
