@@ -51,6 +51,7 @@ struct Node<R: BufRead, W: Write> {
     id: String,
     ears: R,
     mouth: W,
+    message_counter: usize,
 }
 
 impl<'a> Default for Node<StdinLock<'a>, Stdout> {
@@ -59,6 +60,7 @@ impl<'a> Default for Node<StdinLock<'a>, Stdout> {
             id: String::from("NO_ID"),
             ears: io::stdin().lock(),
             mouth: io::stdout(),
+            message_counter: 0,
         }
     }
 }
@@ -97,13 +99,14 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     body: Body {
                         specific_fields: SpecificBodyFields::InitOk,
                         common_fields: CommonBodyFields {
-                            msg_id: Some(1),
+                            msg_id: Some(self.message_counter),
                             in_reply_to: message.body.common_fields.msg_id,
                         },
                     },
                 };
                 let json = serde_json::to_string(&answer).unwrap();
                 writeln!(&mut self.mouth, "{:}", json).unwrap();
+                self.message_counter += self.message_counter;
             }
             SpecificBodyFields::InitOk => unreachable!(),
             SpecificBodyFields::Echo { echo } => {
@@ -113,12 +116,13 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     body: Body {
                         specific_fields: SpecificBodyFields::EchoOk { echo },
                         common_fields: CommonBodyFields {
-                            msg_id: Some(1),
+                            msg_id: Some(self.message_counter),
                             in_reply_to: message.body.common_fields.msg_id,
                         },
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                self.message_counter += self.message_counter;
             }
             SpecificBodyFields::EchoOk { echo } => {
                 let _ = echo;
