@@ -1,4 +1,7 @@
-use std::io::{self, BufRead, StdinLock, Stdout, Write};
+use std::{
+    io::{self, BufRead, StdinLock, Stdout, Write},
+    time::SystemTime,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -34,6 +37,10 @@ enum SpecificBodyFields {
     },
     EchoOk {
         echo: String,
+    },
+    Generate,
+    GenerateOk {
+        id: String,
     },
 }
 
@@ -104,8 +111,8 @@ impl<R: BufRead, W: Write> Node<R, W> {
                         },
                     },
                 };
-                let json = serde_json::to_string(&answer).unwrap();
-                writeln!(&mut self.mouth, "{:}", json).unwrap();
+                // let json = serde_json::to_string(&answer).unwrap();
+                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
                 self.message_counter += self.message_counter;
             }
             SpecificBodyFields::InitOk => unreachable!(),
@@ -124,9 +131,33 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
                 self.message_counter += self.message_counter;
             }
-            SpecificBodyFields::EchoOk { echo } => {
-                let _ = echo;
+            SpecificBodyFields::EchoOk { .. } => unreachable!(),
+            SpecificBodyFields::Generate => {
+                let answer = Message {
+                    src: self.id.clone(),
+                    dest: message.src,
+                    body: Body {
+                        specific_fields: SpecificBodyFields::GenerateOk {
+                            // id: format!("{}-{:?}", self.id, std::time::SystemTime::now()),
+                            id: format!(
+                                "{}-{}",
+                                self.id,
+                                std::time::SystemTime::now()
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_micros()
+                            ),
+                        },
+                        common_fields: CommonBodyFields {
+                            msg_id: Some(self.message_counter),
+                            in_reply_to: message.body.common_fields.msg_id,
+                        },
+                    },
+                };
+                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                self.message_counter += self.message_counter;
             }
+            SpecificBodyFields::GenerateOk { .. } => unreachable!(),
         }
     }
 }

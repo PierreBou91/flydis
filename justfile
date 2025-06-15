@@ -15,6 +15,9 @@ build:
 
 all: test_echo test_id test_broadcast1 test_broadcast2 test_broadcast3
 
+serve: build
+  ./maelstrom/maelstrom serve
+
 test_echo: build
   ./maelstrom/maelstrom test -w echo --bin {{bin}} --node-count 1 --time-limit 10
 
