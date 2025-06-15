@@ -1,6 +1,7 @@
 use std::io::{self, BufRead, StdinLock, Stdout, Write};
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Message {
@@ -11,27 +12,37 @@ struct Message {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Body {
-    r#type: Type,
+    #[serde(flatten)]
+    specific_fields: SpecificBodyFields,
+    #[serde(flatten)]
+    common_fields: CommonBodyFields,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+// internally tagging this enum allows to match the maelstrom protocol specs
+// https://serde.rs/enum-representations.html
+#[serde(tag = "type")]
+#[serde(rename_all = "snake_case")]
+enum SpecificBodyFields {
+    Init {
+        node_id: String,
+        node_ids: Vec<String>,
+    },
+    InitOk,
+    Echo {
+        echo: String,
+    },
+    EchoOk {
+        echo: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct CommonBodyFields {
     #[serde(skip_serializing_if = "Option::is_none")]
     msg_id: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     in_reply_to: Option<usize>,
-    #[serde(flatten)]
-    specific_fields: BodyKind,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(untagged)]
-enum BodyKind {
-    BodyInit {
-        node_id: String,
-        node_ids: Vec<String>,
-    },
-}
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-enum Type {
-    Init,
 }
 
 // Generic over any BufRead to allow for different input sources like a TcpStream
@@ -66,16 +77,52 @@ impl<R: BufRead, W: Write> Node<R, W> {
             let line = buf.trim_end();
             match serde_json::from_str::<Message>(line) {
                 Ok(msg) => self.handle_message(msg),
-                Err(e) => writeln!(&mut self.mouth, "Error deserializing input: {e}")?,
+                Err(e) => writeln!(io::stderr().lock(), "Error deserializing input: {e}")?,
             }
         }
         Ok(())
     }
 
+    // {"src":  "c1", "dest": "n1", "body": { "type": "init", "msg_id":   1, "node_id":  "n3", "node_ids": ["n1", "n2", "n3"] }}
+
     fn handle_message(&mut self, message: Message) {
-        writeln!(&mut self.mouth, "{:?}", message).unwrap();
-        match message.body.r#type {
-            Type::Init => todo!(),
+        match message.body.specific_fields {
+            SpecificBodyFields::Init { node_id, node_ids } => {
+                assert_eq!(self.id, "NO_ID");
+                let _ = node_ids;
+                self.id = node_id;
+                let answer = Message {
+                    src: self.id.clone(),
+                    dest: message.src,
+                    body: Body {
+                        specific_fields: SpecificBodyFields::InitOk,
+                        common_fields: CommonBodyFields {
+                            msg_id: Some(1),
+                            in_reply_to: message.body.common_fields.msg_id,
+                        },
+                    },
+                };
+                let json = serde_json::to_string(&answer).unwrap();
+                writeln!(&mut self.mouth, "{:}", json).unwrap();
+            }
+            SpecificBodyFields::InitOk => unreachable!(),
+            SpecificBodyFields::Echo { echo } => {
+                let answer = Message {
+                    src: self.id.clone(),
+                    dest: message.src,
+                    body: Body {
+                        specific_fields: SpecificBodyFields::EchoOk { echo },
+                        common_fields: CommonBodyFields {
+                            msg_id: Some(1),
+                            in_reply_to: message.body.common_fields.msg_id,
+                        },
+                    },
+                };
+                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+            }
+            SpecificBodyFields::EchoOk { echo } => {
+                let _ = echo;
+            }
         }
     }
 }
@@ -83,6 +130,7 @@ impl<R: BufRead, W: Write> Node<R, W> {
 fn main() -> io::Result<()> {
     let mut node: Node<StdinLock, Stdout> = Node::default();
     node.run()?;
+    // test_serde();
     Ok(())
 }
 
@@ -92,12 +140,13 @@ fn test_serde() {
         src: String::from("n1"),
         dest: String::from("n2"),
         body: Body {
-            r#type: Type::Init,
-            msg_id: Some(4),
-            in_reply_to: Some(5),
-            specific_fields: BodyKind::BodyInit {
-                node_id: String::from("n3"),
-                node_ids: vec![String::from("n1"), String::from("n2")],
+            specific_fields: SpecificBodyFields::Init {
+                node_id: String::from("n1"),
+                node_ids: vec![String::from("qwer"), String::from("Yo")],
+            },
+            common_fields: CommonBodyFields {
+                msg_id: Some(123),
+                in_reply_to: Some(345),
             },
         },
     };
