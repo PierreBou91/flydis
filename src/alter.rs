@@ -58,6 +58,10 @@ enum SpecificBodyFields {
         topology: HashMap<String, Vec<String>>,
     },
     TopologyOk,
+    MultiBroadcast {
+        messages: HashSet<usize>,
+    },
+    MultiBroadcastOk,
 }
 
 impl SpecificBodyFields {
@@ -76,6 +80,8 @@ impl SpecificBodyFields {
             SpecificBodyFields::ReadOk { .. } => String::from("READ_OK"),
             SpecificBodyFields::Topology { .. } => String::from("TOPOLOGY"),
             SpecificBodyFields::TopologyOk => String::from("TOPOLOGY_OK"),
+            SpecificBodyFields::MultiBroadcast { .. } => String::from("MULTI_BROADCAST"),
+            SpecificBodyFields::MultiBroadcastOk => String::from("MULTI_BROADCAST_OK"),
         }
     }
 }
@@ -151,9 +157,7 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 eprintln!("SENT INIT_OK: {}", json!(answer));
                 self.message_counter += 1;
             }
-
             SpecificBodyFields::InitOk => unreachable!(),
-
             SpecificBodyFields::Echo { echo } => {
                 let answer = Message {
                     src: self.id.clone(),
@@ -168,9 +172,7 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 eprintln!("SENT ECHO_OK: {}", json!(answer));
                 self.message_counter += 1;
             }
-
             SpecificBodyFields::EchoOk { .. } => unreachable!(),
-
             SpecificBodyFields::Generate => {
                 let answer = Message {
                     src: self.id.clone(),
@@ -194,9 +196,7 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 eprintln!("SENT GENERATE_OK: {}", json!(answer));
                 self.message_counter += 1;
             }
-
             SpecificBodyFields::GenerateOk { .. } => unreachable!(),
-
             SpecificBodyFields::Broadcast { broadcast_message } => {
                 if message.dest == self.id {
                     self.store.insert(broadcast_message);
@@ -218,26 +218,38 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 // Broadcast any new value to my neighbor if he's not the one who sent it
                 for nei in &self.neighbours {
                     if nei != &message.src {
-                        for (transmit_id, value) in &self.to_transmit {
-                            let answer = Message {
-                                src: self.id.clone(),
-                                dest: nei.into(),
-                                body: Body {
-                                    specific_fields: SpecificBodyFields::Broadcast {
-                                        broadcast_message: *value,
-                                    },
-                                    msg_id: Some(*transmit_id),
-                                    in_reply_to: message.body.msg_id,
-                                },
-                            };
-                            writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                            self.message_counter += 1;
-                            eprintln!("SENT BROADCAST: {}", json!(answer));
-                        }
+                        // for (transmit_id, value) in &self.to_transmit {
+                        //     let answer = Message {
+                        //         src: self.id.clone(),
+                        //         dest: nei.into(),
+                        //         body: Body {
+                        //             specific_fields: SpecificBodyFields::Broadcast {
+                        //                 broadcast_message: *value,
+                        //             },
+                        //             msg_id: Some(*transmit_id),
+                        //             in_reply_to: message.body.msg_id,
+                        //         },
+                        //     };
+                        //     writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                        //     self.message_counter += 1;
+                        //     eprintln!("SENT BROADCAST: {}", json!(answer));
+                        // }
+
+                        let answer = Message {
+                            src: self.id.clone(),
+                            dest: nei.to_string(),
+                            body: Body {
+                                specific_fields: SpecificBodyFields::Read,
+                                msg_id: Some(self.message_counter),
+                                in_reply_to: None,
+                            },
+                        };
+                        writeln!(&mut self.mouth, "{}", json!(answer)).unwrap();
+                        self.message_counter += 1;
+                        eprintln!("SENT READ: {}", json!(answer));
                     }
                 }
             }
-
             SpecificBodyFields::BroadcastOk => {
                 self.to_transmit.remove(&message.body.in_reply_to.unwrap());
                 eprintln!(
@@ -246,7 +258,6 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     self.to_transmit
                 );
             }
-
             SpecificBodyFields::Read => {
                 let answer = Message {
                     src: self.id.clone(),
@@ -263,9 +274,26 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 self.message_counter += 1;
                 eprintln!("SENT READ_OK: {}", json!(answer));
             }
-
-            SpecificBodyFields::ReadOk { .. } => unreachable!(),
-
+            SpecificBodyFields::ReadOk { messages } => {
+                for value in &self.store {
+                    if !messages.contains(value) {
+                        let answer = Message {
+                            src: self.id.clone(),
+                            dest: message.src.clone(),
+                            body: Body {
+                                specific_fields: SpecificBodyFields::Broadcast {
+                                    broadcast_message: *value,
+                                },
+                                msg_id: Some(self.message_counter),
+                                in_reply_to: message.body.msg_id,
+                            },
+                        };
+                        writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                        self.message_counter += 1;
+                        eprintln!("SENT BROADCAST: {}", json!(answer));
+                    }
+                }
+            }
             SpecificBodyFields::Topology { topology } => {
                 if let Some(nei) = topology.get(&self.id) {
                     self.neighbours = nei.to_vec();
@@ -283,8 +311,11 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 self.message_counter += 1;
                 eprintln!("SENT TOPO_OK {}", json!(answer))
             }
-
             SpecificBodyFields::TopologyOk => unreachable!(),
+
+            SpecificBodyFields::MultiBroadcast { .. } => {}
+
+            SpecificBodyFields::MultiBroadcastOk => todo!(),
         }
     }
 }
