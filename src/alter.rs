@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{self, BufRead, StdinLock, Stdout, Write},
     time::SystemTime,
 };
@@ -52,7 +52,7 @@ enum SpecificBodyFields {
     BroadcastOk,
     Read,
     ReadOk {
-        messages: Vec<usize>,
+        messages: HashSet<usize>,
     },
     Topology {
         topology: HashMap<String, Vec<String>>,
@@ -67,7 +67,7 @@ struct Node<R: BufRead, W: Write> {
     ears: R,
     mouth: W,
     message_counter: usize,
-    store: Vec<usize>,
+    store: HashSet<usize>,
     topo: HashMap<String, Vec<String>>,
 }
 
@@ -78,7 +78,7 @@ impl<'a> Default for Node<StdinLock<'a>, Stdout> {
             ears: io::stdin().lock(),
             mouth: io::stdout(),
             message_counter: 0,
-            store: Vec::new(),
+            store: HashSet::new(),
             topo: HashMap::new(),
         }
     }
@@ -103,8 +103,6 @@ impl<R: BufRead, W: Write> Node<R, W> {
         }
         Ok(())
     }
-
-    // {"src":  "c1", "dest": "n1", "body": { "type": "init", "msg_id":   1, "node_id":  "n3", "node_ids": ["n1", "n2", "n3"] }}
 
     fn handle_message(&mut self, message: Message) {
         match message.body.specific_fields {
@@ -163,10 +161,10 @@ impl<R: BufRead, W: Write> Node<R, W> {
             }
             SpecificBodyFields::GenerateOk { .. } => unreachable!(),
             SpecificBodyFields::Broadcast { broadcast_message } => {
-                self.store.push(broadcast_message);
+                self.store.insert(broadcast_message);
                 let answer = Message {
                     src: self.id.clone(),
-                    dest: message.src,
+                    dest: message.src.clone(),
                     body: Body {
                         specific_fields: SpecificBodyFields::BroadcastOk {},
                         msg_id: Some(self.message_counter),
@@ -175,8 +173,29 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
                 self.message_counter += self.message_counter;
+
+                // Broadcast any new value to my neighbor if he's not the one who sent it
+                if let Some(neighbours) = self.topo.get(&self.id) {
+                    for nei in neighbours {
+                        if nei != &message.src {
+                            let answer = Message {
+                                src: self.id.clone(),
+                                dest: nei.into(),
+                                body: Body {
+                                    specific_fields: SpecificBodyFields::Broadcast {
+                                        broadcast_message,
+                                    },
+                                    msg_id: Some(self.message_counter),
+                                    in_reply_to: message.body.msg_id,
+                                },
+                            };
+                            writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                            self.message_counter += self.message_counter;
+                        }
+                    }
+                }
             }
-            SpecificBodyFields::BroadcastOk => unreachable!(),
+            SpecificBodyFields::BroadcastOk => {}
             SpecificBodyFields::Read => {
                 let answer = Message {
                     src: self.id.clone(),
