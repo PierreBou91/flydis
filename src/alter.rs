@@ -60,6 +60,26 @@ enum SpecificBodyFields {
     TopologyOk,
 }
 
+impl SpecificBodyFields {
+    #[allow(unused)]
+    fn type_name(&self) -> String {
+        match self {
+            SpecificBodyFields::Init { .. } => String::from("INIT"),
+            SpecificBodyFields::InitOk => String::from("INIT_OK"),
+            SpecificBodyFields::Echo { .. } => String::from("ECHO"),
+            SpecificBodyFields::EchoOk { .. } => String::from("ECHO_OK"),
+            SpecificBodyFields::Generate => String::from("GENERATE"),
+            SpecificBodyFields::GenerateOk { .. } => String::from("GENERATE_OK"),
+            SpecificBodyFields::Broadcast { .. } => String::from("BROADCAST"),
+            SpecificBodyFields::BroadcastOk => String::from("BROADCAST_OK"),
+            SpecificBodyFields::Read => String::from("READ"),
+            SpecificBodyFields::ReadOk { .. } => String::from("READ_OK"),
+            SpecificBodyFields::Topology { .. } => String::from("TOPOLOGY"),
+            SpecificBodyFields::TopologyOk => String::from("TOPOLOGY_OK"),
+        }
+    }
+}
+
 // Generic over any BufRead to allow for different input sources like a TcpStream
 // might be dumb
 struct Node<R: BufRead, W: Write> {
@@ -98,6 +118,7 @@ impl<R: BufRead, W: Write> Node<R, W> {
             } // EOF, maybe don't break ?
 
             let line = buf.trim_end();
+            // eprintln!("RAW RECEIVED: {}", line);
             match serde_json::from_str::<Message>(line) {
                 Ok(msg) => self.handle_message(msg),
                 Err(e) => writeln!(io::stderr().lock(), "Error deserializing input: {e}")?,
@@ -107,6 +128,11 @@ impl<R: BufRead, W: Write> Node<R, W> {
     }
 
     fn handle_message(&mut self, message: Message) {
+        // eprintln!(
+        //     "RECEIVED {}: {}",
+        //     message.body.specific_fields.type_name(),
+        //     json!(message)
+        // );
         match message.body.specific_fields {
             SpecificBodyFields::Init { node_id, node_ids } => {
                 assert_eq!(self.id, "NO_ID");
@@ -122,7 +148,8 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                self.message_counter += self.message_counter;
+                // eprintln!("SENT INIT_OK: {}", json!(answer));
+                self.message_counter += 1;
             }
             SpecificBodyFields::InitOk => unreachable!(),
             SpecificBodyFields::Echo { echo } => {
@@ -136,7 +163,8 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                self.message_counter += self.message_counter;
+                // eprintln!("SENT ECHO_OK: {}", json!(answer));
+                self.message_counter += 1;
             }
             SpecificBodyFields::EchoOk { .. } => unreachable!(),
             SpecificBodyFields::Generate => {
@@ -159,29 +187,32 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                self.message_counter += self.message_counter;
+                // eprintln!("SENT GENERATE_OK: {}", json!(answer));
+                self.message_counter += 1;
             }
             SpecificBodyFields::GenerateOk { .. } => unreachable!(),
             SpecificBodyFields::Broadcast { broadcast_message } => {
-                self.store.insert(broadcast_message);
-                let answer = Message {
-                    src: self.id.clone(),
-                    dest: message.src.clone(),
-                    body: Body {
-                        specific_fields: SpecificBodyFields::BroadcastOk {},
-                        msg_id: Some(self.message_counter),
-                        in_reply_to: message.body.msg_id,
-                    },
-                };
-                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                self.message_counter += self.message_counter;
-
+                if message.dest == self.id {
+                    self.store.insert(broadcast_message);
+                    let answer = Message {
+                        src: self.id.clone(),
+                        dest: message.src.clone(),
+                        body: Body {
+                            specific_fields: SpecificBodyFields::BroadcastOk {},
+                            msg_id: Some(self.message_counter),
+                            in_reply_to: message.body.msg_id,
+                        },
+                    };
+                    writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                    self.message_counter += 1;
+                    // eprintln!("SENT BROADCAST_OK: {}", json!(answer));
+                }
                 self.to_transmit
                     .insert(self.message_counter, broadcast_message);
                 // Broadcast any new value to my neighbor if he's not the one who sent it
                 for nei in &self.neighbours {
                     if nei != &message.src {
-                        for (_, value) in &self.to_transmit {
+                        for (transmit_id, value) in &self.to_transmit {
                             let answer = Message {
                                 src: self.id.clone(),
                                 dest: nei.into(),
@@ -189,18 +220,24 @@ impl<R: BufRead, W: Write> Node<R, W> {
                                     specific_fields: SpecificBodyFields::Broadcast {
                                         broadcast_message: *value,
                                     },
-                                    msg_id: Some(self.message_counter),
+                                    msg_id: Some(*transmit_id),
                                     in_reply_to: message.body.msg_id,
                                 },
                             };
                             writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                            self.message_counter += self.message_counter;
+                            self.message_counter += 1;
+                            // eprintln!("SENT BROADCAST: {}", json!(answer));
                         }
                     }
                 }
             }
             SpecificBodyFields::BroadcastOk => {
                 self.to_transmit.remove(&message.body.in_reply_to.unwrap());
+                // eprintln!(
+                //     "BROADCAST REMOVED {}\nREMAINING {:?}",
+                //     json!(&message.body.in_reply_to.unwrap()),
+                //     self.to_transmit
+                // );
             }
             SpecificBodyFields::Read => {
                 let answer = Message {
@@ -215,7 +252,8 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                self.message_counter += self.message_counter;
+                self.message_counter += 1;
+                // eprintln!("SENT READ_OK: {}", json!(answer));
             }
             SpecificBodyFields::ReadOk { .. } => unreachable!(),
             SpecificBodyFields::Topology { topology } => {
@@ -232,7 +270,8 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
-                self.message_counter += self.message_counter;
+                self.message_counter += 1;
+                // eprintln!("SENT TOPO_OK {}", json!(answer))
             }
             SpecificBodyFields::TopologyOk => unreachable!(),
         }
