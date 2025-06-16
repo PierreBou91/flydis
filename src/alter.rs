@@ -68,7 +68,8 @@ struct Node<R: BufRead, W: Write> {
     mouth: W,
     message_counter: usize,
     store: HashSet<usize>,
-    topo: HashMap<String, Vec<String>>,
+    neighbours: Vec<String>,
+    to_transmit: HashMap<usize, usize>,
 }
 
 impl<'a> Default for Node<StdinLock<'a>, Stdout> {
@@ -79,7 +80,8 @@ impl<'a> Default for Node<StdinLock<'a>, Stdout> {
             mouth: io::stdout(),
             message_counter: 0,
             store: HashSet::new(),
-            topo: HashMap::new(),
+            neighbours: Vec::new(),
+            to_transmit: HashMap::new(),
         }
     }
 }
@@ -174,16 +176,18 @@ impl<R: BufRead, W: Write> Node<R, W> {
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
                 self.message_counter += self.message_counter;
 
+                self.to_transmit
+                    .insert(self.message_counter, broadcast_message);
                 // Broadcast any new value to my neighbor if he's not the one who sent it
-                if let Some(neighbours) = self.topo.get(&self.id) {
-                    for nei in neighbours {
-                        if nei != &message.src {
+                for nei in &self.neighbours {
+                    if nei != &message.src {
+                        for (_, value) in &self.to_transmit {
                             let answer = Message {
                                 src: self.id.clone(),
                                 dest: nei.into(),
                                 body: Body {
                                     specific_fields: SpecificBodyFields::Broadcast {
-                                        broadcast_message,
+                                        broadcast_message: *value,
                                     },
                                     msg_id: Some(self.message_counter),
                                     in_reply_to: message.body.msg_id,
@@ -195,7 +199,9 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     }
                 }
             }
-            SpecificBodyFields::BroadcastOk => {}
+            SpecificBodyFields::BroadcastOk => {
+                self.to_transmit.remove(&message.body.in_reply_to.unwrap());
+            }
             SpecificBodyFields::Read => {
                 let answer = Message {
                     src: self.id.clone(),
@@ -213,7 +219,9 @@ impl<R: BufRead, W: Write> Node<R, W> {
             }
             SpecificBodyFields::ReadOk { .. } => unreachable!(),
             SpecificBodyFields::Topology { topology } => {
-                self.topo = topology;
+                if let Some(nei) = topology.get(&self.id) {
+                    self.neighbours = nei.to_vec();
+                }
                 let answer = Message {
                     src: self.id.clone(),
                     dest: message.src,
@@ -241,12 +249,12 @@ fn main() -> io::Result<()> {
 #[allow(unused)]
 fn test_serde() {
     let mess = Message {
-        src: String::from("n1"),
-        dest: String::from("n2"),
+        src: String::from("pierre"),
+        dest: String::from("n1"),
         body: Body {
             specific_fields: SpecificBodyFields::Init {
                 node_id: String::from("n1"),
-                node_ids: vec![String::from("qwer"), String::from("Yo")],
+                node_ids: vec![String::from("n1"), String::from("n2")],
             },
             msg_id: Some(123),
             in_reply_to: Some(345),
