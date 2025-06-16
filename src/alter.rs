@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io::{self, BufRead, StdinLock, Stdout, Write},
     time::SystemTime,
 };
@@ -17,8 +18,10 @@ struct Message {
 struct Body {
     #[serde(flatten)]
     specific_fields: SpecificBodyFields,
-    #[serde(flatten)]
-    common_fields: CommonBodyFields,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    msg_id: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    in_reply_to: Option<usize>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -42,14 +45,19 @@ enum SpecificBodyFields {
     GenerateOk {
         id: String,
     },
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct CommonBodyFields {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    msg_id: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    in_reply_to: Option<usize>,
+    Broadcast {
+        #[serde(rename = "message")]
+        broadcast_message: usize,
+    },
+    BroadcastOk,
+    Read,
+    ReadOk {
+        messages: Vec<usize>,
+    },
+    Topology {
+        topology: HashMap<String, Vec<String>>,
+    },
+    TopologyOk,
 }
 
 // Generic over any BufRead to allow for different input sources like a TcpStream
@@ -59,6 +67,8 @@ struct Node<R: BufRead, W: Write> {
     ears: R,
     mouth: W,
     message_counter: usize,
+    store: Vec<usize>,
+    topo: HashMap<String, Vec<String>>,
 }
 
 impl<'a> Default for Node<StdinLock<'a>, Stdout> {
@@ -68,6 +78,8 @@ impl<'a> Default for Node<StdinLock<'a>, Stdout> {
             ears: io::stdin().lock(),
             mouth: io::stdout(),
             message_counter: 0,
+            store: Vec::new(),
+            topo: HashMap::new(),
         }
     }
 }
@@ -105,13 +117,10 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     dest: message.src,
                     body: Body {
                         specific_fields: SpecificBodyFields::InitOk,
-                        common_fields: CommonBodyFields {
-                            msg_id: Some(self.message_counter),
-                            in_reply_to: message.body.common_fields.msg_id,
-                        },
+                        msg_id: Some(self.message_counter),
+                        in_reply_to: message.body.msg_id,
                     },
                 };
-                // let json = serde_json::to_string(&answer).unwrap();
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
                 self.message_counter += self.message_counter;
             }
@@ -122,10 +131,8 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     dest: message.src,
                     body: Body {
                         specific_fields: SpecificBodyFields::EchoOk { echo },
-                        common_fields: CommonBodyFields {
-                            msg_id: Some(self.message_counter),
-                            in_reply_to: message.body.common_fields.msg_id,
-                        },
+                        msg_id: Some(self.message_counter),
+                        in_reply_to: message.body.msg_id,
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
@@ -138,7 +145,6 @@ impl<R: BufRead, W: Write> Node<R, W> {
                     dest: message.src,
                     body: Body {
                         specific_fields: SpecificBodyFields::GenerateOk {
-                            // id: format!("{}-{:?}", self.id, std::time::SystemTime::now()),
                             id: format!(
                                 "{}-{}",
                                 self.id,
@@ -148,16 +154,60 @@ impl<R: BufRead, W: Write> Node<R, W> {
                                     .as_micros()
                             ),
                         },
-                        common_fields: CommonBodyFields {
-                            msg_id: Some(self.message_counter),
-                            in_reply_to: message.body.common_fields.msg_id,
-                        },
+                        msg_id: Some(self.message_counter),
+                        in_reply_to: message.body.msg_id,
                     },
                 };
                 writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
                 self.message_counter += self.message_counter;
             }
             SpecificBodyFields::GenerateOk { .. } => unreachable!(),
+            SpecificBodyFields::Broadcast { broadcast_message } => {
+                self.store.push(broadcast_message);
+                let answer = Message {
+                    src: self.id.clone(),
+                    dest: message.src,
+                    body: Body {
+                        specific_fields: SpecificBodyFields::BroadcastOk {},
+                        msg_id: Some(self.message_counter),
+                        in_reply_to: message.body.msg_id,
+                    },
+                };
+                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                self.message_counter += self.message_counter;
+            }
+            SpecificBodyFields::BroadcastOk => unreachable!(),
+            SpecificBodyFields::Read => {
+                let answer = Message {
+                    src: self.id.clone(),
+                    dest: message.src,
+                    body: Body {
+                        specific_fields: SpecificBodyFields::ReadOk {
+                            messages: self.store.clone(),
+                        },
+                        msg_id: Some(self.message_counter),
+                        in_reply_to: message.body.msg_id,
+                    },
+                };
+                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                self.message_counter += self.message_counter;
+            }
+            SpecificBodyFields::ReadOk { .. } => unreachable!(),
+            SpecificBodyFields::Topology { topology } => {
+                self.topo = topology;
+                let answer = Message {
+                    src: self.id.clone(),
+                    dest: message.src,
+                    body: Body {
+                        specific_fields: SpecificBodyFields::TopologyOk,
+                        msg_id: Some(self.message_counter),
+                        in_reply_to: message.body.msg_id,
+                    },
+                };
+                writeln!(&mut self.mouth, "{:}", json!(answer)).unwrap();
+                self.message_counter += self.message_counter;
+            }
+            SpecificBodyFields::TopologyOk => unreachable!(),
         }
     }
 }
@@ -179,10 +229,8 @@ fn test_serde() {
                 node_id: String::from("n1"),
                 node_ids: vec![String::from("qwer"), String::from("Yo")],
             },
-            common_fields: CommonBodyFields {
-                msg_id: Some(123),
-                in_reply_to: Some(345),
-            },
+            msg_id: Some(123),
+            in_reply_to: Some(345),
         },
     };
 
