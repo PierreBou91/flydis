@@ -3,6 +3,7 @@ alias t2 := test_id
 alias t3 := test_broadcast1
 alias t4 := test_broadcast2
 alias t5 := test_broadcast3
+alias t6 := test_broadcast4
 
 bin := "target/release/alter"
 # bin := "target/release/node"
@@ -13,7 +14,7 @@ default:
 build:
   cargo b --release
 
-all: test_echo test_id test_broadcast1 test_broadcast2 test_broadcast3
+all: test_echo test_id test_broadcast1 test_broadcast2 test_broadcast3 test_broadcast4
 
 serve: build
   ./maelstrom/maelstrom serve
@@ -32,3 +33,6 @@ test_broadcast2: build
 
 test_broadcast3: build
   ./maelstrom/maelstrom test -w broadcast --bin {{bin}} --node-count 5 --time-limit 20 --rate 10 --nemesis partition
+
+test_broadcast4: build
+  ./maelstrom/maelstrom test -w broadcast --bin {{bin}} --node-count 25 --time-limit 20 --rate 100 --latency 100
